@@ -1,0 +1,33 @@
+# EPUB files
+*.epub
+
+# Book directory
+book/
+
+# EPUB output directory
+epub-output/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
