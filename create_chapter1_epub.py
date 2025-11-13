@@ -70,6 +70,10 @@ def clean_html_content(soup):
     for style in soup.find_all('style'):
         style.decompose()
 
+    # Remove MathJax containers (they contain complex SVG and attributes)
+    for mathjax in soup.find_all(['mjx-container', 'mjx-assistive-mml', 'mjx-speech']):
+        mathjax.decompose()
+
     # Remove navigation elements
     for nav in soup.find_all(['nav', 'div'], class_=['mt-guide-listings', 'mt-topic-hierarchy-listings', 'autoattribution', 'mt-content-footer']):
         nav.decompose()
