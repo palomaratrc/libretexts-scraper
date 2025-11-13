@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """
-Create a complete EPUB file for Chapter 1 of the Botany textbook.
+Create a complete EPUB file from HTML files in the book/ directory.
 Extracts content from HTML files, downloads images, and creates a proper EPUB structure.
 
+By default, auto-discovers all .html files in the book/ directory, sorts them naturally,
+and extracts titles from the HTML content.
+
 Usage:
-    python create_chapter1_epub.py [--single-page]
+    python create_chapter1_epub.py [options]
 
 Options:
-    --single-page    Generate EPUB with all content in a single page (default: multi-page)
+    --single-page              Generate EPUB with all content in a single page (default: multi-page)
+    --files FILE [FILE ...]    Specific HTML files to process (supports wildcards)
+
+Examples:
+    python create_chapter1_epub.py                              # Auto-discover, multi-page
+    python create_chapter1_epub.py --single-page                # Auto-discover, single-page
+    python create_chapter1_epub.py --files 1.1*.html            # Process files matching pattern
+    python create_chapter1_epub.py --files file1.html file2.html # Process specific files
 """
 
 import os
@@ -17,21 +27,11 @@ import hashlib
 import urllib.request
 import urllib.parse
 import argparse
+import glob
 from bs4 import BeautifulSoup
 from datetime import datetime
 import zipfile
 import uuid
-
-# Chapter file configuration
-CHAPTER_FILES = [
-    ('1.1-introduction.html', '1.1 Introduction'),
-    ('1.1.1-the-scientific-method.html', '1.1.1 The Scientific Method'),
-    ('1.1.2-organisms-studied-in-botany.html', '1.1.2 Organisms Studied in Botany'),
-    ('1.1.3-intro-to-evolution.html', '1.1.3 Intro to Evolution'),
-    ('1.1.4-life-cycles.html', '1.1.4 Life Cycles'),
-    ('1.1.5-subfields-and-applications-in-plant-biology.html', '1.1.5 Subfields and Applications in Plant Biology'),
-    ('1.1.6-chapter-summary.html', '1.1.6 Chapter Summary'),
-]
 
 # Get the directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +55,78 @@ stats = {
     'images_failed': 0,
     'errors': []
 }
+
+def natural_sort_key(filename):
+    """
+    Generate a key for natural sorting of filenames.
+    Handles version numbers like 1.1, 1.1.1, 1.2, 1.10 correctly.
+    """
+    def convert(text):
+        return int(text) if text.isdigit() else text.lower()
+
+    # Extract just the filename without path
+    basename = os.path.basename(filename)
+    # Split on non-alphanumeric characters and convert numbers to integers
+    return [convert(c) for c in re.split('([0-9]+)', basename)]
+
+def extract_title_from_html(filepath):
+    """
+    Extract a title from an HTML file.
+    Tries <title> tag first, then falls back to first <h1>, then filename.
+    """
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            soup = BeautifulSoup(f.read(), 'html.parser')
+
+        # Try <title> tag first
+        if soup.title and soup.title.string:
+            title = soup.title.string.strip()
+            # Remove common suffixes like " - LibreTexts"
+            title = re.sub(r'\s*[-|]\s*(LibreTexts|Botany).*$', '', title)
+            if title:
+                return title
+
+        # Try first <h1> tag
+        h1 = soup.find('h1')
+        if h1 and h1.get_text():
+            return h1.get_text().strip()
+
+        # Fall back to filename (remove .html and replace hyphens/underscores)
+        basename = os.path.basename(filepath)
+        title = os.path.splitext(basename)[0]
+        title = title.replace('-', ' ').replace('_', ' ')
+        # Capitalize each word
+        return ' '.join(word.capitalize() for word in title.split())
+
+    except Exception as e:
+        # If anything fails, use filename
+        basename = os.path.basename(filepath)
+        return os.path.splitext(basename)[0].replace('-', ' ').replace('_', ' ')
+
+def discover_html_files(book_dir):
+    """
+    Auto-discover HTML files in the book directory.
+    Returns a list of (filename, title) tuples sorted naturally.
+    """
+    # Find all HTML files
+    html_files = glob.glob(os.path.join(book_dir, '*.html'))
+
+    if not html_files:
+        print(f"WARNING: No HTML files found in {book_dir}")
+        return []
+
+    # Sort naturally (1.1, 1.1.1, 1.2, not 1.1, 1.10, 1.2)
+    html_files.sort(key=natural_sort_key)
+
+    # Extract titles
+    chapter_files = []
+    for filepath in html_files:
+        basename = os.path.basename(filepath)
+        title = extract_title_from_html(filepath)
+        chapter_files.append((basename, title))
+        print(f"  Found: {basename} -> {title}")
+
+    return chapter_files
 
 def clean_html_content(soup):
     """Remove scripts, footers, and other non-content elements."""
@@ -472,10 +544,19 @@ def package_epub():
 
     print(f"EPUB created: {EPUB_FILE}")
 
-def main(single_page=False):
+def main(single_page=False, chapter_files=None):
     """Main processing function."""
     mode_text = "single-page" if single_page else "multi-page"
     print(f"Creating Botany Chapter 1 EPUB ({mode_text} mode)\n" + "="*50)
+
+    # Auto-discover HTML files if not provided
+    if chapter_files is None:
+        print("\nAuto-discovering HTML files...")
+        chapter_files = discover_html_files(BOOK_DIR)
+        if not chapter_files:
+            print("ERROR: No HTML files found to process!")
+            sys.exit(1)
+        print(f"\nFound {len(chapter_files)} file(s) to process.\n")
 
     # Create basic EPUB structure
     create_mimetype()
@@ -487,7 +568,7 @@ def main(single_page=False):
     chapters_content = []  # Store content for single-page mode
 
     # Process each chapter
-    for i, (html_file, title) in enumerate(CHAPTER_FILES):
+    for i, (html_file, title) in enumerate(chapter_files):
         filepath = os.path.join(BOOK_DIR, html_file)
 
         if not os.path.exists(filepath):
@@ -596,19 +677,61 @@ def main(single_page=False):
 if __name__ == '__main__':
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
-        description='Create EPUB file for Botany Chapter 1',
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description='Create EPUB file from HTML files in the book/ directory',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  %(prog)s                              # Auto-discover all HTML files, multi-page mode
+  %(prog)s --single-page                 # Auto-discover all HTML files, single-page mode
+  %(prog)s --files 1.1*.html             # Process files matching pattern
+  %(prog)s --files file1.html file2.html # Process specific files
+        '''
     )
     parser.add_argument(
         '--single-page',
         action='store_true',
         help='Generate EPUB with all content in a single page (default: multi-page)'
     )
+    parser.add_argument(
+        '--files',
+        nargs='+',
+        metavar='FILE',
+        help='Specific HTML files to process (supports wildcards). If not specified, auto-discovers all HTML files.'
+    )
 
     args = parser.parse_args()
 
+    # Handle file specification
+    chapter_files = None
+    if args.files:
+        print("Using specified files...")
+        chapter_files = []
+        for file_pattern in args.files:
+            # Support both absolute paths and basenames
+            if os.path.isabs(file_pattern):
+                matches = glob.glob(file_pattern)
+            else:
+                matches = glob.glob(os.path.join(BOOK_DIR, file_pattern))
+
+            if not matches:
+                print(f"WARNING: No files found matching: {file_pattern}")
+                continue
+
+            # Sort matches naturally
+            matches.sort(key=natural_sort_key)
+
+            for filepath in matches:
+                basename = os.path.basename(filepath)
+                title = extract_title_from_html(filepath)
+                chapter_files.append((basename, title))
+                print(f"  Added: {basename} -> {title}")
+
+        if not chapter_files:
+            print("ERROR: No files found to process!")
+            sys.exit(1)
+
     try:
-        main(single_page=args.single_page)
+        main(single_page=args.single_page, chapter_files=chapter_files)
     except Exception as e:
         print(f"\nFATAL ERROR: {str(e)}")
         import traceback
